@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: devsecops-api
+  namespace: staging
+  labels:
+    app: devsecops-api
+spec:
+  selector:
+    app: devsecops-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP
+  type: LoadBalancer      # use ClusterIP + Ingress in production

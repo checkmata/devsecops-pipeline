@@ -1,0 +1,150 @@
+name: CD
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  # ── Build & push production image ───────────────────────────────────────────
+  build-push:
+    name: Build & Push Production Image
+    runs-on: ubuntu-latest
+    outputs:
+      image-digest: ${{ steps.push.outputs.digest }}
+      image-tags: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build & push
+        id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: production
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Scan production image (HARD FAIL on HIGH/CRITICAL) ──────────────────────
+  scan-prod-image:
+    name: Scan Production Image
+    runs-on: ubuntu-latest
+    needs: build-push
+
+    steps:
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}@${{ needs.build-push.outputs.image-digest }}
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  # ── Deploy to staging ────────────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy → Staging
+    runs-on: ubuntu-latest
+    needs: scan-prod-image
+    environment: staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Substitute image digest in k8s manifest
+        run: |
+          sed -i "s|IMAGE_TAG|${{ env.IMAGE_NAME }}@${{ needs.build-push.outputs.image-digest }}|g" \
+            k8s/deployment.yaml
+
+      - name: Configure kubectl (Minikube / EKS)
+        run: |
+          # For EKS: aws eks update-kubeconfig --region us-east-1 --name devsecops-prod
+          # For local Minikube: already configured in runner
+          echo "kubectl configured"
+
+      - name: Apply Kubernetes manifests (staging)
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/configmap.yaml   -n staging
+          kubectl apply -f k8s/deployment.yaml  -n staging
+          kubectl apply -f k8s/service.yaml     -n staging
+          kubectl apply -f k8s/hpa.yaml         -n staging
+          kubectl rollout status deployment/devsecops-api -n staging --timeout=120s
+
+      - name: Smoke test staging
+        run: |
+          STAGING_URL="http://$(kubectl get svc devsecops-api -n staging \
+            -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+          sleep 10
+          curl -sf "${STAGING_URL}/health"
+          echo "✓ Staging smoke test passed"
+
+  # ── Deploy to production (requires manual approval) ──────────────────────────
+  deploy-production:
+    name: Deploy → Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    environment: production     # configured with required reviewers in GitHub UI
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Substitute image digest in k8s manifest
+        run: |
+          sed -i "s|IMAGE_TAG|${{ env.IMAGE_NAME }}@${{ needs.build-push.outputs.image-digest }}|g" \
+            k8s/deployment.yaml
+
+      - name: Apply Kubernetes manifests (production)
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/configmap.yaml   -n production
+          kubectl apply -f k8s/deployment.yaml  -n production
+          kubectl apply -f k8s/service.yaml     -n production
+          kubectl apply -f k8s/hpa.yaml         -n production
+          kubectl rollout status deployment/devsecops-api -n production --timeout=180s
+
+      - name: Production smoke test
+        run: |
+          PROD_URL="http://$(kubectl get svc devsecops-api -n production \
+            -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+          sleep 15
+          curl -sf "${PROD_URL}/health"
+          echo "✓ Production smoke test passed"

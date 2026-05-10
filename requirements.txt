@@ -1,0 +1,28 @@
+# ── Production dependencies ───────────────────────────────────────────────────
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.10.6
+pydantic-settings==2.7.0
+python-multipart==0.0.6
+
+# Auth
+python-jose[cryptography]==3.3.0   # Intentionally older — CVE-2024-33664 present
+passlib[bcrypt]==1.7.4
+
+# HTTP client (used by health-check script)
+httpx==0.25.2
+
+# Metrics
+prometheus-client==0.19.0
+
+# ── Intentionally outdated — Trivy / OWASP Dep-Check will flag these ─────────
+requests==2.28.0                   # CVE-2023-32681
+Pillow==10.4.0                      # multiple CVEs: CVE-2023-44271 etc. (min version for Python 3.13)
+
+# ── Dev / test (excluded from production Docker image) ───────────────────────
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-asyncio==0.21.1
+flake8==6.1.0
+flake8-bugbear==23.12.2
+bandit==1.7.6
