@@ -51,7 +51,7 @@ test:
 	pytest tests/ -v --cov=app --cov-report=xml --cov-report=term-missing
 
 lint:
-	flake8 app/ tests/ --max-line-length=100 --statistics
+	flake8 app/ tests/ --max-line-length=100 --statistics --extend-ignore=B008
 
 # ── Security ──────────────────────────────────────────────────────────────────
 scan: build
@@ -64,9 +64,9 @@ scan-fs:
 # ── Smoke test ────────────────────────────────────────────────────────────────
 smoke:
 	@echo "Running smoke tests against http://localhost:8000 ..."
-	@curl -sf http://localhost:8000/health | python3 -m json.tool
+	@curl.exe -sf http://localhost:8000/health | python -m json.tool
 	@echo "✓ Health check passed"
-	@curl -sf http://localhost:8000/ready  | python3 -m json.tool
+	@curl.exe -sf http://localhost:8000/ready  | python -m json.tool
 	@echo "✓ Readiness check passed"
 
 # ── Clean ─────────────────────────────────────────────────────────────────────

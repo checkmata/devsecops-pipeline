@@ -10,11 +10,12 @@ volumes:
   grafana-data:
   prometheus-data:
 
-# ── Services ──────────────────────────────────────────────────────────────────
+    # ── Services ──────────────────────────────────────────────────────────────────
 services:
 
   # ── API ────────────────────────────────────────────────────────────────────
   api:
+    image: devsecops-api:local
     build:
       context: .
       target: production
@@ -25,8 +26,7 @@ services:
       ENV: development
       LOG_LEVEL: info
     healthcheck:
-      test: ["CMD", "python", "-c",
-             "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      test: [ "CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()" ]
       interval: 30s
       timeout: 10s
       retries: 3

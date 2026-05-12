@@ -8,6 +8,7 @@ python-multipart==0.0.6
 # Auth
 python-jose[cryptography]==3.3.0   # Intentionally older — CVE-2024-33664 present
 passlib[bcrypt]==1.7.4
+bcrypt==3.1.7
 
 # HTTP client (used by health-check script)
 httpx==0.25.2

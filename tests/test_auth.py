@@ -1,4 +1,3 @@
-import pytest
 from app.auth import (
     create_access_token,
     verify_token,
