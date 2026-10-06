@@ -5,6 +5,36 @@ metadata:
   namespace: staging
   annotations:
     # cert-manager issues a TLS certificate automatically
+    # For local Minikube: use selfsigned-issuer
+    # For cloud staging: use letsencrypt-staging
+    # For cloud production: use letsencrypt-prod
+    cert-manager.io/cluster-issuer: "selfsigned-issuer"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.staging.local       # works with minikube tunnel + /etc/hosts
+      secretName: devsecops-api-tls
+  rules:
+    - host: api.staging.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: devsecops-api
+                port:
+                  name: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: devsecops-api-ingress
+  namespace: production
+  annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: "1m"
@@ -12,10 +42,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - api.staging.example.com       # replace with your domain
+        - api.example.com       # REPLACE with your production domain
       secretName: devsecops-api-tls
   rules:
-    - host: api.staging.example.com
+    - host: api.example.com
       http:
         paths:
           - path: /

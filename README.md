@@ -130,8 +130,9 @@ devsecops-pipeline/
 │   ├── service.yaml            # ClusterIP/LoadBalancer
 │   ├── configmap.yaml          # Non-secret app config
 │   ├── hpa.yaml                # HorizontalPodAutoscaler
-│   ├── ingress.yaml            # Ingress + TLS (cert-manager)
-│   └── service-monitor.yaml    # Prometheus operator ServiceMonitor
+│   ├── ingress.yaml            # Ingress + TLS (cert-manager) — staging + production
+│   ├── service-monitor.yaml    # Prometheus operator ServiceMonitor
+│   └── prometheus-rules.yaml   # PrometheusRule alerts for Alertmanager
 │
 ├── .github/
 │   └── workflows/
@@ -142,7 +143,10 @@ devsecops-pipeline/
 ├── monitoring/
 │   ├── prometheus.yml          # Prometheus config for docker-compose
 │   └── grafana/
-│       └── provisioning/       # Auto-configure datasource + dashboards
+│       ├── provisioning/       # Auto-configure datasource + dashboards
+│       └── dashboards/         # Pre-built Grafana dashboard JSON
+│           ├── devsecops-api.json
+│           └── devsecops-api-production.json
 │
 ├── terraform/                  # EKS cluster (cloud promotion path)
 │   ├── main.tf
@@ -151,10 +155,13 @@ devsecops-pipeline/
 │
 ├── docs/
 │   ├── ADR.md                  # Architecture Decision Records
-│   └── DEMO_SCRIPT.md          # 5-minute interview walkthrough
+│   ├── DEMO_SCRIPT.md          # 5-minute interview walkthrough
+│   └── RUNBOOK.md              # Alert troubleshooting procedures
 │
 ├── scripts/
 │   ├── install-monitoring.sh   # Helm install kube-prometheus-stack
+│   ├── install-cert-manager.sh # Install cert-manager + ClusterIssuers
+│   ├── deploy-eks.sh           # Full EKS deployment automation
 │   └── smoke-test.sh           # End-to-end smoke tests
 │
 ├── .zap/rules.tsv              # OWASP ZAP rule overrides
@@ -473,6 +480,104 @@ manifests work on EKS.
 
 ---
 
+## New: Automated EKS Deployment
+
+For a fully automated cloud deployment, use the helper script:
+
+```bash
+# Full deployment (Terraform + monitoring + cert-manager + ingress + app)
+bash scripts/deploy-eks.sh deploy
+
+# Or step by step:
+bash scripts/deploy-eks.sh plan      # Terraform plan only
+bash scripts/deploy-eks.sh apply     # Terraform apply only
+bash scripts/deploy-eks.sh monitoring # Deploy monitoring stack only
+bash scripts/deploy-eks.sh cert-manager # Deploy cert-manager only
+bash scripts/deploy-eks.sh ingress   # Deploy NGINX Ingress only
+bash scripts/deploy-eks.sh app       # Deploy application only
+bash scripts/deploy-eks.sh destroy   # Tear down everything
+```
+
+The script handles:
+- Terraform init/plan/apply for VPC + EKS
+- kubectl configuration
+- kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
+- cert-manager with Let's Encrypt ClusterIssuer
+- NGINX Ingress Controller (LoadBalancer)
+- Application deployment to production namespace
+
+**Prerequisites:** AWS credentials configured, `terraform`, `kubectl`, `helm` installed.
+
+---
+
+## New: Local TLS with cert-manager (Minikube)
+
+Enable HTTPS on Minikube with self-signed certificates:
+
+```bash
+# 1. Install cert-manager and create self-signed ClusterIssuer
+bash scripts/install-cert-manager.sh
+
+# 2. Enable ingress addon
+minikube addons enable ingress
+
+# 3. Deploy app with ingress
+kubectl apply -f k8s/ingress.yaml -n staging
+
+# 4. Add to /etc/hosts (get IP from: minikube ip)
+echo "$(minikube ip) api.staging.local" | sudo tee -a /etc/hosts
+
+# 5. Test HTTPS
+curl -k https://api.staging.local/health
+```
+
+The ingress uses `selfsigned-issuer` for local development. For cloud, update `k8s/ingress.yaml` to use `letsencrypt-staging` or `letsencrypt-prod`.
+
+---
+
+## New: Pre-built Grafana Dashboards
+
+Two dashboards are provisioned automatically:
+
+| Dashboard | UID | Focus |
+|-----------|-----|-------|
+| DevSecOps API - Staging | `devsecops-api-staging` | Full staging observability |
+| DevSecOps API - Production | `devsecops-api-production` | Production-focused panels |
+
+Access via Grafana (local: http://localhost:3000, admin/admin123). Dashboards include:
+- Error rate gauge (5xx, 4xx)
+- P99 latency gauge
+- HPA replica count
+- Request rate by endpoint (time series)
+- Latency percentiles P50/P95/P99 by endpoint
+- Pod memory/CPU usage vs limits
+- Pod status and deployment replicas
+- HTTP status code distribution
+
+---
+
+## New: Alerting with Runbook
+
+PrometheusRule alerts are defined in `k8s/prometheus-rules.yaml` and cover:
+
+| Alert | Severity | Condition |
+|-------|----------|-----------|
+| `DevSecOpsHighErrorRate` | critical | 5xx > 5% for 2m |
+| `DevSecOpsHighErrorRate4xx` | warning | 4xx > 10% for 5m |
+| `DevSecOpsHighLatency` | warning | P99 > 1s for 5m |
+| `DevSecOpsPodDown` | critical | Pod not running 1m |
+| `DevSecOpsHPAAtMaxReplicas` | warning | At max replicas 10m |
+| `DevSecOpsHighMemoryUsage` | warning | Memory > 85% limit 5m |
+| `DevSecOpsHighCPUUsage` | warning | CPU > 85% limit 5m |
+| `DevSecOpsRolloutStuck` | warning | Rollout > 10m |
+| `DevSecOpsCertExpiringSoon` | warning | Cert expires < 30 days |
+
+See `docs/RUNBOOK.md` for step-by-step diagnosis and resolution procedures for each alert.
+
+---
+
+---
+
 ## GitHub repository configuration
 
 ### Required secrets
@@ -610,6 +715,16 @@ even more in interviews:
 6. **Multi-region / blue-green deployment** — extend the Terraform to provision
    two EKS clusters in different regions with Route53 weighted routing. This
    demonstrates zero-downtime deployments.
+
+---
+
+### Recently Completed ✅
+
+- ✅ **cert-manager + TLS** — Self-signed for Minikube, Let's Encrypt for cloud
+- ✅ **Grafana dashboards** — Pre-built JSON dashboards auto-provisioned
+- ✅ **Alertmanager rules** — PrometheusRule with 9 alerts + runbook
+- ✅ **EKS deployment automation** — Single-script full stack deployment
+- ✅ **Production namespace ingress** — Separate staging/production ingress with TLS
 
 ---
 

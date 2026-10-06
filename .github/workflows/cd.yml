@@ -17,7 +17,7 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
-  # ── Build & push production image ───────────────────────────────────────────
+  # Build & push production image
   build-push:
     name: Build & Push Production Image
     runs-on: ubuntu-latest
@@ -62,7 +62,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── Scan production image (HARD FAIL on HIGH/CRITICAL) ──────────────────────
+  # Scan production image 
   scan-prod-image:
     name: Scan Production Image
     runs-on: ubuntu-latest
@@ -77,7 +77,7 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
 
-  # ── Deploy to staging ────────────────────────────────────────────────────────
+  # Deploy to staging 
   deploy-staging:
     name: Deploy → Staging
     runs-on: ubuntu-latest
@@ -116,7 +116,7 @@ jobs:
           curl -sf "${STAGING_URL}/health"
           echo "✓ Staging smoke test passed"
 
-  # ── Deploy to production (requires manual approval) ──────────────────────────
+  # Deploy to production (requires manual approval)
   deploy-production:
     name: Deploy → Production
     runs-on: ubuntu-latest

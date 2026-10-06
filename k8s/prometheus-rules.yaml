@@ -1,0 +1,138 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: devsecops-api-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring
+    prometheus: kube-prometheus-stack
+spec:
+  groups:
+    - name: devsecops-api.rules
+      rules:
+        # High error rate alert
+        - alert: DevSecOpsHighErrorRate
+          expr: |
+            (
+              sum(rate(http_requests_total{namespace="staging",status_code=~"5.."}[5m]))
+              /
+              sum(rate(http_requests_total{namespace="staging"}[5m]))
+            ) > 0.05
+          for: 2m
+          labels:
+            severity: critical
+            component: api
+          annotations:
+            summary: "High 5xx error rate on devsecops-api (staging)"
+            description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+            runbook_url: "https://github.com/checkmata/devsecops-pipeline/blob/main/docs/RUNBOOK.md#high-error-rate"
+
+        - alert: DevSecOpsHighErrorRate4xx
+          expr: |
+            (
+              sum(rate(http_requests_total{namespace="staging",status_code=~"4.."}[5m]))
+              /
+              sum(rate(http_requests_total{namespace="staging"}[5m]))
+            ) > 0.10
+          for: 5m
+          labels:
+            severity: warning
+            component: api
+          annotations:
+            summary: "High 4xx error rate on devsecops-api (staging)"
+            description: "Client error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+        # High latency alert
+        - alert: DevSecOpsHighLatency
+          expr: |
+            histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="staging"}[5m])) by (le)) > 1
+          for: 5m
+          labels:
+            severity: warning
+            component: api
+          annotations:
+            summary: "High P99 latency on devsecops-api (staging)"
+            description: "P99 latency is {{ $value }}s for the last 5 minutes"
+            runbook_url: "https://github.com/checkmata/devsecops-pipeline/blob/main/docs/RUNBOOK.md#high-latency"
+
+        # Pod down alert
+        - alert: DevSecOpsPodDown
+          expr: |
+            kube_pod_container_status_running{namespace="staging",pod=~"devsecops-api-.*",container="api"} == 0
+          for: 1m
+          labels:
+            severity: critical
+            component: api
+          annotations:
+            summary: "devsecops-api pod not running (staging)"
+            description: "Pod {{ $labels.pod }} has been not running for 1 minute"
+
+        # HPA scaling alert
+        - alert: DevSecOpsHPAAtMaxReplicas
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{namespace="staging",horizontalpodautoscaler="devsecops-api-hpa"} == 10
+          for: 10m
+          labels:
+            severity: warning
+            component: api
+          annotations:
+            summary: "HPA at max replicas (staging)"
+            description: "devsecops-api has been at max replicas (10) for 10 minutes - investigate load or consider increasing maxReplicas"
+
+        - alert: DevSecOpsHPAScalingUp
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{namespace="staging",horizontalpodautoscaler="devsecops-api-hpa"} > 5
+          for: 5m
+          labels:
+            severity: info
+            component: api
+          annotations:
+            summary: "HPA scaling up (staging)"
+            description: "devsecops-api scaled to {{ $value }} replicas - traffic increase detected"
+
+        # Resource usage alerts
+        - alert: DevSecOpsHighMemoryUsage
+          expr: |
+            (sum(container_memory_working_set_bytes{namespace="staging",container="api"}) by (pod) / sum(container_spec_memory_limit_bytes{namespace="staging",container="api"}) by (pod)) > 0.85
+          for: 5m
+          labels:
+            severity: warning
+            component: api
+          annotations:
+            summary: "High memory usage on devsecops-api pod (staging)"
+            description: "Pod {{ $labels.pod }} memory usage is {{ $value | humanizePercentage }} of limit"
+
+        - alert: DevSecOpsHighCPUUsage
+          expr: |
+            (sum(rate(container_cpu_usage_seconds_total{namespace="staging",container="api"}[5m])) by (pod) / sum(container_spec_cpu_quota{namespace="staging",container="api"}/container_spec_cpu_period{namespace="staging",container="api"}) by (pod)) > 0.85
+          for: 5m
+          labels:
+            severity: warning
+            component: api
+          annotations:
+            summary: "High CPU usage on devsecops-api pod (staging)"
+            description: "Pod {{ $labels.pod }} CPU usage is {{ $value | humanizePercentage }} of limit"
+
+        # Deployment rollout alerts
+        - alert: DevSecOpsRolloutStuck
+          expr: |
+            kube_deployment_status_replicas_updated{namespace="staging",deployment="devsecops-api"} != kube_deployment_status_replicas{namespace="staging",deployment="devsecops-api"}
+          for: 10m
+          labels:
+            severity: warning
+            component: api
+          annotations:
+            summary: "Deployment rollout stuck (staging)"
+            description: "devsecops-api rollout has not completed in 10 minutes"
+
+        # Certificate expiration alerts (cert-manager)
+        - alert: DevSecOpsCertExpiringSoon
+          expr: |
+            certmanager_certificate_expiration_timestamp_seconds - time() < 86400 * 30
+          for: 1h
+          labels:
+            severity: warning
+            component: tls
+          annotations:
+            summary: "TLS certificate expiring soon"
+            description: "Certificate {{ $labels.certificate }} in namespace {{ $labels.namespace }} expires in less than 30 days"
